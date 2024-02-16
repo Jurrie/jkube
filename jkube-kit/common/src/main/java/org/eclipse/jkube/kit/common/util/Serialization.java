@@ -13,6 +13,18 @@
  */
 package org.eclipse.jkube.kit.common.util;
 
+import java.io.BufferedReader;
+import java.io.ByteArrayInputStream;
+import java.io.File;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.net.URL;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.stream.Collectors;
+
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.ObjectReader;
@@ -24,34 +36,28 @@ import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import io.fabric8.kubernetes.api.model.KubernetesResource;
 import io.fabric8.kubernetes.client.utils.KubernetesSerialization;
 
-import java.io.ByteArrayInputStream;
-import java.io.File;
-import java.io.IOException;
-import java.io.InputStream;
-import java.net.URL;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-
 public class Serialization {
 
   private static final ObjectMapper JSON_MAPPER = new ObjectMapper();
   private static final ObjectMapper YAML_MAPPER = new ObjectMapper(new YAMLFactory()
-    .configure(YAMLGenerator.Feature.MINIMIZE_QUOTES, true)
-    .configure(YAMLGenerator.Feature.ALWAYS_QUOTE_NUMBERS_AS_STRINGS, true));
+      .configure(YAMLGenerator.Feature.MINIMIZE_QUOTES, true)
+      .configure(YAMLGenerator.Feature.ALWAYS_QUOTE_NUMBERS_AS_STRINGS, true));
   private static final KubernetesSerialization KUBERNETES_SERIALIZATION = new KubernetesSerialization(JSON_MAPPER, true);
+
   static {
-    for (ObjectMapper mapper : new ObjectMapper[]{JSON_MAPPER, YAML_MAPPER}) {
+    for (ObjectMapper mapper : new ObjectMapper[] { JSON_MAPPER, YAML_MAPPER }) {
       mapper.enable(SerializationFeature.INDENT_OUTPUT)
-        .enable(SerializationFeature.ORDER_MAP_ENTRIES_BY_KEYS)
-        .disable(SerializationFeature.WRITE_EMPTY_JSON_ARRAYS)
-        .disable(SerializationFeature.WRITE_NULL_MAP_VALUES);
+          //.enable(SerializationFeature.ORDER_MAP_ENTRIES_BY_KEYS)
+          .disable(SerializationFeature.WRITE_EMPTY_JSON_ARRAYS)
+          .disable(SerializationFeature.WRITE_NULL_MAP_VALUES);
     }
     YAML_MAPPER.registerModules(new JavaTimeModule(), KUBERNETES_SERIALIZATION.getUnmatchedFieldTypeModule());
     KUBERNETES_SERIALIZATION.getUnmatchedFieldTypeModule().setRestrictToTemplates(false);
     KUBERNETES_SERIALIZATION.getUnmatchedFieldTypeModule().setLogWarnings(false);
   }
 
-  private Serialization() {}
+  private Serialization() {
+  }
 
   public static <T> T unmarshal(String objectAsString) {
     return unmarshal(objectAsString, (Class<T>) KubernetesResource.class);
@@ -66,42 +72,53 @@ public class Serialization {
   }
 
   public static <T> T unmarshal(File file, Class<T> clazz) throws IOException {
-    try (InputStream fis = Files.newInputStream(file.toPath())) {
+    return unmarshal(file.toPath(), clazz);
+  }
+
+  public static <T> T unmarshal(File file, TypeReference<T> type) throws IOException {
+    return unmarshal(file.toPath(), type);
+  }
+
+  public static <T> T unmarshal(Path file, Class<T> clazz) throws IOException {
+    try (InputStream fis = Files.newInputStream(file)) {
       return unmarshal(fis, clazz);
     }
   }
 
-  public static <T> T unmarshal(File file, TypeReference<T> type) throws IOException {
-    try (InputStream fis = Files.newInputStream(file.toPath())) {
+  public static <T> T unmarshal(Path file, TypeReference<T> type) throws IOException {
+    try (InputStream fis = Files.newInputStream(file)) {
       return unmarshal(fis, type);
     }
   }
-  public static <T> T unmarshal(URL url, Class<T> type) throws IOException {
-    try (InputStream is = url.openStream()){
-      return unmarshal(is, type);
+
+  public static <T> T unmarshal(URL url, Class<T> clazz) throws IOException {
+    try (InputStream is = url.openStream()) {
+      return unmarshal(is, clazz);
     }
   }
 
   public static <T> T unmarshal(URL url, TypeReference<T> type) throws IOException {
-    try (InputStream is = url.openStream()){
+    try (InputStream is = url.openStream()) {
       return unmarshal(is, type);
     }
   }
 
-  public static <T> T unmarshal(InputStream is, Class<T> clazz) {
-    return KUBERNETES_SERIALIZATION.unmarshal(is, clazz);
+  public static <T> T unmarshal(final InputStream is, final Class<T> clazz) {
+    return unmarshal(inputStreamToString(is), clazz);
   }
 
-  public static <T> T unmarshal(InputStream is, TypeReference<T> type) {
-    return KUBERNETES_SERIALIZATION.unmarshal(is, type);
+  public static <T> T unmarshal(final InputStream is, final TypeReference<T> type) {
+    return unmarshal(inputStreamToString(is), type);
   }
 
-  public static <T> T unmarshal(String string, Class<T> type) {
-    return KUBERNETES_SERIALIZATION.unmarshal(string, type);
+  public static <T> T unmarshal(final String string, final Class<T> clazz) {
+    final byte[] yaml = TemplateUtil.escapeYamlTemplate(string).getBytes(StandardCharsets.UTF_8);
+    return KUBERNETES_SERIALIZATION.unmarshal(new ByteArrayInputStream(yaml), clazz);
   }
 
-  public static <T> T unmarshal(String string, TypeReference<T> type) {
-    return unmarshal(new ByteArrayInputStream(string.getBytes(StandardCharsets.UTF_8)), type);
+  public static <T> T unmarshal(final String string, final TypeReference<T> type) {
+    final byte[] yaml = TemplateUtil.escapeYamlTemplate(string).getBytes(StandardCharsets.UTF_8);
+    return KUBERNETES_SERIALIZATION.unmarshal(new ByteArrayInputStream(yaml), type);
   }
 
   public static <T> T merge(T original, T overrides) throws IOException {
@@ -122,7 +139,8 @@ public class Serialization {
   }
 
   public static String asYaml(Object object) {
-    return KUBERNETES_SERIALIZATION.asYaml(object);
+    final String yamlString = KUBERNETES_SERIALIZATION.asYaml(object);
+    return TemplateUtil.unescapeYamlTemplate(yamlString);
   }
 
   public static void saveJson(File resultFile, Object value) throws IOException {
@@ -130,6 +148,15 @@ public class Serialization {
   }
 
   public static void saveYaml(File resultFile, Object value) throws IOException {
-    YAML_MAPPER.writeValue(resultFile, value);
+    String yamlString = YAML_MAPPER.writeValueAsString(value);
+    yamlString = TemplateUtil.unescapeYamlTemplate(yamlString);
+    Files.write(resultFile.toPath(), yamlString.getBytes(StandardCharsets.UTF_8));
+  }
+
+  private static String inputStreamToString(final InputStream is) {
+    return new BufferedReader(
+        new InputStreamReader(is, StandardCharsets.UTF_8))
+            .lines()
+            .collect(Collectors.joining("\n"));
   }
 }

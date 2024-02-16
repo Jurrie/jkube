@@ -13,10 +13,18 @@
  */
 package org.eclipse.jkube.kit.resource.helm;
 
+import static org.apache.commons.lang3.StringUtils.EMPTY;
+import static org.eclipse.jkube.kit.common.JKubeFileInterpolator.DEFAULT_FILTER;
+import static org.eclipse.jkube.kit.common.JKubeFileInterpolator.interpolate;
+import static org.eclipse.jkube.kit.common.util.MapUtil.getNestedMap;
+import static org.eclipse.jkube.kit.common.util.YamlUtil.listYamls;
+import static org.eclipse.jkube.kit.resource.helm.HelmServiceUtil.isRepositoryValid;
+import static org.eclipse.jkube.kit.resource.helm.HelmServiceUtil.selectHelmRepository;
+import static org.eclipse.jkube.kit.resource.helm.HelmServiceUtil.setAuthentication;
+
 import java.io.File;
 import java.io.IOException;
 import java.nio.charset.Charset;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
@@ -34,6 +42,12 @@ import java.util.stream.Stream;
 import com.marcnuri.helm.Helm;
 import com.marcnuri.helm.LintCommand;
 import com.marcnuri.helm.LintResult;
+import io.fabric8.kubernetes.api.model.HasMetadata;
+import io.fabric8.kubernetes.api.model.KubernetesResource;
+import io.fabric8.openshift.api.model.Template;
+import org.apache.commons.compress.archivers.tar.TarArchiveEntry;
+import org.apache.commons.io.FileUtils;
+import org.apache.commons.lang3.StringUtils;
 import org.eclipse.jkube.kit.common.JKubeConfiguration;
 import org.eclipse.jkube.kit.common.JKubeException;
 import org.eclipse.jkube.kit.common.KitLogger;
@@ -48,24 +62,6 @@ import org.eclipse.jkube.kit.common.util.ResourceUtil;
 import org.eclipse.jkube.kit.common.util.Serialization;
 import org.eclipse.jkube.kit.config.resource.ResourceServiceConfig;
 import org.eclipse.jkube.kit.enricher.api.util.KubernetesResourceFragments;
-
-import io.fabric8.kubernetes.api.model.HasMetadata;
-import io.fabric8.kubernetes.api.model.KubernetesResource;
-import io.fabric8.openshift.api.model.Template;
-import org.apache.commons.compress.archivers.tar.TarArchiveEntry;
-import org.apache.commons.io.FileUtils;
-import org.apache.commons.lang3.StringUtils;
-
-
-import static org.apache.commons.lang3.StringUtils.EMPTY;
-import static org.eclipse.jkube.kit.common.JKubeFileInterpolator.DEFAULT_FILTER;
-import static org.eclipse.jkube.kit.common.JKubeFileInterpolator.interpolate;
-import static org.eclipse.jkube.kit.common.util.MapUtil.getNestedMap;
-import static org.eclipse.jkube.kit.common.util.TemplateUtil.escapeYamlTemplate;
-import static org.eclipse.jkube.kit.common.util.YamlUtil.listYamls;
-import static org.eclipse.jkube.kit.resource.helm.HelmServiceUtil.isRepositoryValid;
-import static org.eclipse.jkube.kit.resource.helm.HelmServiceUtil.selectHelmRepository;
-import static org.eclipse.jkube.kit.resource.helm.HelmServiceUtil.setAuthentication;
 
 public class HelmService {
 
@@ -123,8 +119,8 @@ public class HelmService {
       final File tarballFile = new File(tarballOutputDir, String.format("%s-%s%s.%s",
           helmConfig.getChart(), helmConfig.getVersion(), resolveHelmClassifier(helmConfig), helmConfig.getChartExtension()));
       logger.debug("Creating Helm configuration Tarball: '%s'", tarballFile.getAbsolutePath());
-      final Consumer<TarArchiveEntry> prependNameAsDirectory = tae ->
-          tae.setName(String.format("%s/%s", helmConfig.getChart(), tae.getName()));
+      final Consumer<TarArchiveEntry> prependNameAsDirectory = tae -> tae
+          .setName(String.format("%s/%s", helmConfig.getChart(), tae.getName()));
       // outputDir might contain tarball already from previous run, filter out tarball file outputDir from recursive listing
       List<File> helmTarballContents = FileUtil.listFilesAndDirsRecursivelyInDirectory(outputDir).stream()
           .filter(f -> !f.equals(tarballFile))
@@ -140,7 +136,8 @@ public class HelmService {
   /**
    * Uploads the charts defined in the provided {@link HelmConfig} to the applicable configured repository.
    *
-   * <p> For Charts with versions ending in "-SNAPSHOT" the {@link HelmConfig#getSnapshotRepository()} is used.
+   * <p>
+   * For Charts with versions ending in "-SNAPSHOT" the {@link HelmConfig#getSnapshotRepository()} is used.
    * {@link HelmConfig#getStableRepository()} is used for other versions.
    *
    *
@@ -202,30 +199,31 @@ public class HelmService {
       logger.info("Uploading Helm Chart \"%s\" to %s", helmConfig.getChart(), helmRepository.getName());
       logger.debug("OutputDir: %s", helmConfig.getOutputDir());
       helmUploaderManager.getHelmUploader(helmRepository.getType())
-        .uploadSingle(resolveTarballFile(helmConfig, helmType).toFile(), helmRepository);
+          .uploadSingle(resolveTarballFile(helmConfig, helmType).toFile(), helmRepository);
       logger.info("Upload Successful");
     }
   }
 
   private static Path resolveTarballFile(HelmConfig helmConfig, HelmConfig.HelmType helmType) {
     return Paths.get(Objects.requireNonNull(helmConfig.getTarballOutputDir(), "Tarball output directory is required"))
-      .resolve(helmType.getOutputDir())
-      .resolve(String.format("%s-%s%s.%s", helmConfig.getChart(), helmConfig.getVersion(), resolveHelmClassifier(helmConfig), helmConfig.getChartExtension()));
+        .resolve(helmType.getOutputDir())
+        .resolve(String.format("%s-%s%s.%s", helmConfig.getChart(), helmConfig.getVersion(), resolveHelmClassifier(helmConfig),
+            helmConfig.getChartExtension()));
   }
 
   static File prepareSourceDir(HelmConfig helmConfig, HelmConfig.HelmType type) throws IOException {
     final File sourceDir = new File(helmConfig.getSourceDir(), type.getSourceDir());
     if (!sourceDir.isDirectory()) {
       throw new IOException(String.format(
-        "Chart source directory %s does not exist so cannot make chart \"%s\". " +
-          "Probably you need run 'mvn kubernetes:resource' before.",
-        sourceDir.getAbsolutePath(), helmConfig.getChart()));
+          "Chart source directory %s does not exist so cannot make chart \"%s\". " +
+              "Probably you need run 'mvn kubernetes:resource' before.",
+          sourceDir.getAbsolutePath(), helmConfig.getChart()));
     }
     if (!containsYamlFiles(sourceDir)) {
       throw new IOException(String.format(
-        "Chart source directory %s does not contain any YAML manifest to make chart \"%s\". " +
-          "Probably you need run 'mvn kubernetes:resource' before.",
-        sourceDir.getAbsolutePath(), helmConfig.getChart()));
+          "Chart source directory %s does not contain any YAML manifest to make chart \"%s\". " +
+              "Probably you need run 'mvn kubernetes:resource' before.",
+          sourceDir.getAbsolutePath(), helmConfig.getChart()));
     }
     return sourceDir;
   }
@@ -239,7 +237,6 @@ public class HelmService {
     return outputDir;
   }
 
-
   public static boolean containsYamlFiles(File directory) {
     return !listYamls(directory).isEmpty();
   }
@@ -250,12 +247,9 @@ public class HelmService {
       if (dto instanceof Template) {
         splitAndSaveTemplate((Template) dto, templatesDir);
       } else {
-        final String fileName = FileUtil.stripPostfix(FileUtil.stripPostfix(file.getName(), ".yml"), YAML_EXTENSION) + YAML_EXTENSION;
-        File targetFile = new File(templatesDir, fileName);
-        // lets escape any {{ or }} characters to avoid creating invalid templates
-        String text = FileUtils.readFileToString(file, Charset.defaultCharset());
-        text = escapeYamlTemplate(text);
-        FileUtils.write(targetFile, text, Charset.defaultCharset());
+        final String fileName = FileUtil.stripPostfix(FileUtil.stripPostfix(file.getName(), ".yml"), YAML_EXTENSION)
+            + YAML_EXTENSION;
+        FileUtil.copy(file, new File(templatesDir, fileName));
       }
     }
   }
@@ -278,19 +272,19 @@ public class HelmService {
 
   private static Chart chartFromHelmConfig(HelmConfig helmConfig) {
     return Chart.builder()
-      .apiVersion(helmConfig.getApiVersion())
-      .name(helmConfig.getChart())
-      .version(helmConfig.getVersion())
-      .description(helmConfig.getDescription())
-      .home(helmConfig.getHome())
-      .sources(helmConfig.getSources())
-      .maintainers(helmConfig.getMaintainers())
-      .icon(helmConfig.getIcon())
-      .appVersion(helmConfig.getAppVersion())
-      .keywords(helmConfig.getKeywords())
-      .engine(helmConfig.getEngine())
-      .dependencies(helmConfig.getDependencies())
-      .build();
+        .apiVersion(helmConfig.getApiVersion())
+        .name(helmConfig.getChart())
+        .version(helmConfig.getVersion())
+        .description(helmConfig.getDescription())
+        .home(helmConfig.getHome())
+        .sources(helmConfig.getSources())
+        .maintainers(helmConfig.getMaintainers())
+        .icon(helmConfig.getIcon())
+        .appVersion(helmConfig.getAppVersion())
+        .keywords(helmConfig.getKeywords())
+        .engine(helmConfig.getEngine())
+        .dependencies(helmConfig.getDependencies())
+        .build();
   }
 
   private <T> T readFragment(Pattern filePattern, Class<T> type) {
@@ -298,9 +292,10 @@ public class HelmService {
     if (helmChartFragment != null) {
       try {
         return Serialization.unmarshal(
-          interpolate(helmChartFragment, jKubeConfiguration.getProperties(), DEFAULT_FILTER), type);
+            interpolate(helmChartFragment, jKubeConfiguration.getProperties(), DEFAULT_FILTER), type);
       } catch (Exception e) {
-        throw new IllegalArgumentException("Failure in parsing Helm fragment (" + helmChartFragment.getName() + "): " + e.getMessage(), e);
+        throw new IllegalArgumentException(
+            "Failure in parsing Helm fragment (" + helmChartFragment.getName() + "): " + e.getMessage(), e);
       }
     }
     return null;
@@ -340,8 +335,8 @@ public class HelmService {
     return answer;
   }
 
-
-  private static void interpolateTemplateParameterExpressionsWithHelmExpressions(File file, List<HelmParameter> helmParameters) throws IOException {
+  private static void interpolateTemplateParameterExpressionsWithHelmExpressions(File file, List<HelmParameter> helmParameters)
+      throws IOException {
     final String originalTemplate = FileUtils.readFileToString(file, Charset.defaultCharset());
 
     String interpolatedTemplate = originalTemplate;
@@ -377,7 +372,7 @@ public class HelmService {
       helmConfig.getParameterTemplates().stream()
           .map(Template::getParameters).flatMap(List::stream)
           .map(p -> HelmParameter.builder()
-            .name(p.getName()).required(Boolean.TRUE.equals(p.getRequired())).value(p.getValue()).build())
+              .name(p.getName()).required(Boolean.TRUE.equals(p.getRequired())).value(p.getValue()).build())
           .forEach(parameters::add);
     }
     if (helmConfig.getParameters() != null && !helmConfig.getParameters().isEmpty()) {
