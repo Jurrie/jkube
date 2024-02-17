@@ -73,7 +73,7 @@ public class HelmConfig {
   private String security;
   private boolean lintStrict;
   private boolean lintQuiet;
-
+  private String releaseName;
 
   @JsonProperty("dependencies")
   private List<HelmDependency> dependencies;
@@ -90,7 +90,7 @@ public class HelmConfig {
 
   public enum HelmType {
     KUBERNETES("helm", "kubernetes", "kubernetes", "Kubernetes"),
-    OPENSHIFT("helmshift", "openshift","openshift", "OpenShift");
+    OPENSHIFT("helmshift", "openshift", "openshift", "OpenShift");
 
     private final String classifier;
     private final String sourceDir;

@@ -54,7 +54,7 @@ public class HelmMojo extends AbstractJKubeMojo {
   File kubernetesTemplate;
 
   @Parameter
-  HelmConfig helm;
+  protected HelmConfig helm;
 
   @Override
   public void executeInternal() throws MojoExecutionException {
@@ -89,7 +89,7 @@ public class HelmMojo extends AbstractJKubeMojo {
     return HelmConfig.HelmType.KUBERNETES;
   }
 
-  HelmConfig getHelm() {
+  protected HelmConfig getHelm() {
     return helm;
   }
 }

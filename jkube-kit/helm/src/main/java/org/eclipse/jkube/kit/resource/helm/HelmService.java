@@ -32,6 +32,8 @@ import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 import com.marcnuri.helm.Helm;
+import com.marcnuri.helm.InstallCommand;
+import com.marcnuri.helm.InstallResult;
 import com.marcnuri.helm.LintCommand;
 import com.marcnuri.helm.LintResult;
 import org.eclipse.jkube.kit.common.JKubeConfiguration;
@@ -192,6 +194,12 @@ public class HelmService {
         logger.info("Linting successful");
       }
     }
+  }
+
+  public void install(HelmConfig helmConfig, String chartDirectory) {
+    final InstallCommand installCommand = Helm.install(chartDirectory).withName(helmConfig.getReleaseName()).devel();
+    final InstallResult installResult = installCommand.call();
+    System.out.println(installResult);
   }
 
   private void uploadHelmChart(HelmConfig helmConfig, HelmRepository helmRepository)

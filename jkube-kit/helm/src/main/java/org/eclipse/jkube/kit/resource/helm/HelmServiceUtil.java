@@ -73,6 +73,7 @@ public class HelmServiceUtil {
   protected static final String SNAPSHOT_REPOSITORY = "snapshotRepository";
   protected static final String PROPERTY_SECURITY =  "jkube.helm.security";
   protected static final String DEFAULT_SECURITY = "~/.m2/settings-security.xml";
+  protected static final String PROPERTY_RELEASE_NAME = "jkube.helm.releaseName";
 
   protected static final String PROPERTY_HELM_LINT_STRICT = "jkube.helm.lint.strict";
   protected static final String PROPERTY_HELM_LINT_QUIET = "jkube.helm.lint.quiet";
@@ -116,6 +117,7 @@ public class HelmServiceUtil {
         helmConfig::getOutputDir));
     helmConfig.setLintStrict(resolveBooleanFromPropertyOrDefault(PROPERTY_HELM_LINT_STRICT, project, helmConfig::isLintStrict));
     helmConfig.setLintQuiet(resolveBooleanFromPropertyOrDefault(PROPERTY_HELM_LINT_QUIET, project, helmConfig::isLintQuiet));
+    helmConfig.setReleaseName(resolveFromPropertyOrDefault(PROPERTY_RELEASE_NAME, project, helmConfig::getReleaseName,  project::getArtifactId));
     return helmConfig.toBuilder();
   }
 
